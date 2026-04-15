@@ -117,6 +117,8 @@ def generate_evaluation(
 7. 如果有负面特点，用委婉方式表达，不要直接说缺点
 """
 
+    api_key = api_key or DASHSCOPE_API_KEY
+
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
