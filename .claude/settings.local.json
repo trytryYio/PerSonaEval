@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "Bash(PYTHONUTF8=1 python humanizer.py)",
+      "Bash(pip install *)",
+      "Bash(PYTHONUTF8=1 python app.py)",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(curl -s -X POST http://localhost:8000/api/extract -H \"Content-Type: application/json\" -d \"{\\\\\"text\\\\\": \\\\\"一年级三班 54 人 有张三、李四、王五、赵六...一共 54 个\\\\n张三性格活泼，上课积极发言\\\\n李四比较内向，但很认真\\\\\"}\")",
+      "Bash(python -m json.tool)",
+      "Bash(npm run *)",
+      "Bash(cat /d/Idea/IdeaProjectTemp/Tearcher/frontend/node_modules/.vite/vite.config.ts.timestamp*)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(ls -la *.py)",
+      "Bash(python *)",
+      "Bash(git show *)",
+      "Read(//tmp/**)",
+      "Bash(netstat -ano)",
+      "Bash(findstr :8001)"
+    ]
+  }
+}

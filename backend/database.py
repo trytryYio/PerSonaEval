@@ -9,7 +9,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import sessionmaker, relationship, declarative_base
 
-DATABASE_URL = "mysql+pymysql://root:123123@localhost:3306/persoona_eval"
+DATABASE_URL = "mysql+pymysql://root:123123@localhost:3306/persoona_eval?charset=utf8mb4"
 
 engine = create_engine(DATABASE_URL, echo=False)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -79,6 +79,7 @@ class Evaluation(Base):
     performance_notes = Column(Text, default="")
     template = Column(String(10), nullable=False)  # "80/20", "65/35", "90/10"
     content = Column(Text, nullable=False)
+    is_adopted = Column(Integer, default=0)  # 0=未采纳, 1=已采纳
     created_at = Column(DateTime, default=datetime.now)
 
     student = relationship("Student", back_populates="evaluations")

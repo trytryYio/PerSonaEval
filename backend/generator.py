@@ -262,6 +262,155 @@ def generate_all_templates(
     return results
 
 
+def generate_batch_evaluations(
+    lesson_content: str,
+    students: List[Dict],
+    lesson_notes_global: str = "",
+    api_key: str = DASHSCOPE_API_KEY,
+) -> List[Dict]:
+    """
+    批量为全班学生生成 3 份不同风格的评价
+    students: [{"name": "李华", "traits_pct": {...}, "traits_raw": "...", "lesson_notes": "..."}, ...]
+    一次请求 AI 生成所有学生的所有模板评价
+    """
+    api_key = api_key or DASHSCOPE_API_KEY
+
+    # 构建学生信息
+    students_info = ""
+    for i, s in enumerate(students, 1):
+        traits_text = format_traits(s.get("traits_pct", {}))
+        notes = s.get("lesson_notes", "")
+        students_info += f"\n{i}. {s['name']}：\n"
+        students_info += f"   性格特点：{traits_text}\n"
+        if s.get("traits_raw"):
+            students_info += f"   原始描述：{s['traits_raw']}\n"
+        if notes:
+            students_info += f"   当堂表现：{notes}\n"
+
+    # 为每个模板生成一次
+    all_results = []
+    for template_key in ["80/20", "65/35", "90/10"]:
+        tpl = TEMPLATES[template_key]
+
+        prompt = f"""你是一位培训机构的老师，需要给全班学生写课后反馈，发给各自家长。请用平常跟人微信聊天的语气写。
+
+课程内容：{lesson_content}
+{'全班整体表现：' + lesson_notes_global if lesson_notes_global else ''}
+
+学生名单：
+{students_info}
+
+{tpl['instruction']}
+
+请为每个学生分别写一段反馈，按以下格式：
+
+---
+{students[0]['name'] if students else '学生'} 家长您好，这是{students[0]['name'] if students else '孩子'}近期的课程反馈：
+
+课程主题：{lesson_content}
+
+课堂表现：（写一段话）
+
+课后建议：（写 1-2 条具体建议）
+---
+
+重要写作要求（必须遵守）：
+1. 用平常聊天的语气，像发微信一样自然
+2. 不要用这些词：展现了、展示出、彰显了、优异、卓越、显著、积极态度、值得肯定、有待加强、需要改进、建议加强、较为、十分、进一步、提升、培养、至关重要、不可或缺、不可或缺、举足轻重、意味深长、引人入胜、丰富多彩、此外、总而言之、综上所述、总体而言
+3. 不要用"不仅...更..."、"不仅...还..."这类结构
+4. 不要用破折号——
+5. 不要用"作为"代替"是"，直接说"是"
+6. 内容要具体，提到学生实际表现和性格特点
+7. 每个学生总字数 100-200 字
+8. 负面特点要委婉表达
+9. emoji 最多用 1-2 个，放在句末
+10. 每个学生的反馈用 "---" 分隔
+11. 在开头注明学生名字，格式："{students[0]['name'] if students else '学生'}家长您好..."
+"""
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+        payload = {
+            "model": "qwen-turbo",
+            "input": {"messages": [{"role": "user", "content": prompt}]},
+            "parameters": {
+                "temperature": 0.7,
+                "max_tokens": 2000,
+            },
+        }
+
+        try:
+            with httpx.Client(timeout=60.0) as client:
+                response = client.post(API_URL, headers=headers, json=payload)
+                response.raise_for_status()
+                data = response.json()
+                text = data.get("output", {}).get("text", "")
+
+                if text:
+                    # 分割每个学生的评价
+                    parts = re.split(r'\n---+\n', text.strip())
+
+                    for i, student in enumerate(students):
+                        if i < len(parts):
+                            content = parts[i].strip()
+                            # 移除开头的学生名字（如果有的话）
+                            content = re.sub(rf"^{student['name']}家长您好", "家长您好", content)
+                            content = post_humanize(content)
+                        else:
+                            content = "评价生成不完整，请重试。"
+
+                        # 找到或创建该学生的结果
+                        existing = next((r for r in all_results if r["student_name"] == student["name"]), None)
+                        if existing:
+                            existing["evaluations"].append({
+                                "template": template_key,
+                                "label": tpl["label"],
+                                "content": content,
+                            })
+                        else:
+                            all_results.append({
+                                "student_name": student["name"],
+                                "evaluations": [{
+                                    "template": template_key,
+                                    "label": tpl["label"],
+                                    "content": content,
+                                }],
+                            })
+                else:
+                    for student in students:
+                        existing = next((r for r in all_results if r["student_name"] == student["name"]), None)
+                        if not existing:
+                            all_results.append({
+                                "student_name": student["name"],
+                                "evaluations": [],
+                                "error": "AI 返回为空",
+                            })
+
+        except httpx.TimeoutException:
+            for student in students:
+                existing = next((r for r in all_results if r["student_name"] == student["name"]), None)
+                if not existing:
+                    all_results.append({
+                        "student_name": student["name"],
+                        "evaluations": [],
+                        "error": "请求超时",
+                    })
+        except Exception as e:
+            for student in students:
+                existing = next((r for r in all_results if r["student_name"] == student["name"]), None)
+                if not existing:
+                    all_results.append({
+                        "student_name": student["name"],
+                        "evaluations": [],
+                        "error": str(e),
+                    })
+
+    return all_results
+
+
 if __name__ == "__main__":
     results = generate_all_templates(
         student_name="小明",

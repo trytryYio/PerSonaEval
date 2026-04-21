@@ -5,21 +5,51 @@ interface SavedStudent {
   name: string
   traits_raw: string
   traits: { trait: string; percentage: number }[]
+  class_id?: number
+  class_name?: string
 }
 
 interface Evaluation {
+  id?: number
   template: string
   label: string
   content: string
+  is_adopted?: boolean
 }
 
-type Page = 'input' | 'preview' | 'classes'
+interface StudentWithClass extends SavedStudent {
+  class_id: number
+  class_name: string
+}
+
+interface StudentBatchResult {
+  student_id: number
+  student_name: string
+  evaluations: Evaluation[]
+  error?: string
+}
+
+type Page = 'input' | 'preview' | 'classes' | 'student-detail'
+
+const templateBadge: Record<string, string> = {
+  '80/20': 'bg-green-500', '65/35': 'bg-blue-500', '90/10': 'bg-yellow-500',
+}
+const templateColors: Record<string, string> = {
+  '80/20': 'border-green-300 bg-green-50/30',
+  '65/35': 'border-blue-300 bg-blue-50/30',
+  '90/10': 'border-yellow-300 bg-yellow-50/30',
+}
+const templateHeaderColors: Record<string, string> = {
+  '80/20': 'bg-green-100 text-green-800',
+  '65/35': 'bg-blue-100 text-blue-800',
+  '90/10': 'bg-yellow-100 text-yellow-800',
+}
 
 function App() {
   const [page, setPage] = useState<Page>('input')
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('dashscope_api_key') || '')
   const [rawText, setRawText] = useState('')
-  const [extracted, setExtracted] = useState<{ grade: string; class: string; students: { name: string; traits_raw: string; traits_pct: Record<string, number> }[] } | null>(null)
+  const [extracted, setExtracted] = useState<{ grade: string; class: string; students: { name: string; traits_raw: string; traits_pct: Record<string, number> }[]; total_count: number } | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [classes, setClasses] = useState<{ id: number; grade: string; name: string; student_count: number }[]>([])
@@ -27,53 +57,76 @@ function App() {
   const [classStudents, setClassStudents] = useState<SavedStudent[]>([])
   const [selectedStudent, setSelectedStudent] = useState<SavedStudent | null>(null)
   const [lessonContent, setLessonContent] = useState('')
-  const [lessonNotes, setLessonNotes] = useState('')
+  const [lessonNotesGlobal, setLessonNotesGlobal] = useState('')
+  const [studentNotes, setStudentNotes] = useState<Record<number, string>>({})
   const [evaluations, setEvaluations] = useState<Evaluation[]>([])
-  const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null)
-  const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
+  const [copiedId, setCopiedId] = useState<number | null>(null)
   const [showSettings, setShowSettings] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<StudentWithClass[]>([])
+  const [selectedForBatch, setSelectedForBatch] = useState<Set<number>>(new Set())
+  const [batchResults, setBatchResults] = useState<StudentBatchResult[]>([])
+  const [showBatchPanel, setShowBatchPanel] = useState(false)
+
+  // CRUD modals
+  const [showClassModal, setShowClassModal] = useState(false)
+  const [editingClass, setEditingClass] = useState<{ id: number; grade: string; name: string } | null>(null)
+  const [classFormGrade, setClassFormGrade] = useState('')
+  const [classFormName, setClassFormName] = useState('')
+
+  const [showStudentModal, setShowStudentModal] = useState(false)
+  const [editingStudent, setEditingStudent] = useState<{ id: number; name: string } | null>(null)
+  const [studentFormName, setStudentFormName] = useState('')
+
+  const [showTraitModal, setShowTraitModal] = useState(false)
+  const [traitFormTrait, setTraitFormTrait] = useState('')
+  const [traitFormPct, setTraitFormPct] = useState('')
+  const [traitFormOldName, setTraitFormOldName] = useState('')
 
   const API = (path: string) => `/api${path}`
 
+  useEffect(() => { if (page === 'classes') fetchClasses() }, [page])
   useEffect(() => {
-    if (page === 'classes') fetchClasses()
-  }, [page])
+    if (searchQuery.trim()) handleSearch(searchQuery)
+    else setSearchResults([])
+  }, [searchQuery])
 
   const fetchClasses = async () => {
-    try {
-      const res = await fetch(API('/classes'))
-      const data = await res.json()
-      setClasses(data)
-    } catch {
-      setError('获取班级失败')
-    }
+    try { const res = await fetch(API('/classes')); setClasses(await res.json()) }
+    catch { setError('获取班级失败') }
   }
 
   const fetchClassStudents = async (classId: number) => {
     setLoading(true)
     try {
       const res = await fetch(API(`/students/${classId}`))
-      const data = await res.json()
-      setClassStudents(data)
-      setSelectedClassId(classId)
-      setSelectedStudent(null)
-      setEvaluations([])
-      setSelectedTemplate(null)
-    } catch {
-      setError('获取学生失败')
-    } finally {
-      setLoading(false)
-    }
+      const cls = classes.find(c => c.id === classId)
+      const students: SavedStudent[] = await res.json()
+      // Attach class info to each student
+      students.forEach(s => {
+        s.class_id = classId
+        s.class_name = cls ? `${cls.grade}${cls.name}` : ''
+      })
+      setClassStudents(students)
+      setSelectedClassId(classId); setSelectedStudent(null)
+      setEvaluations([]); setShowBatchPanel(false)
+      setStudentNotes({}); setBatchResults([])
+    } catch { setError('获取学生失败') }
+    finally { setLoading(false) }
+  }
+
+  const handleSearch = async (query: string) => {
+    if (!query.trim()) { setSearchResults([]); return }
+    try { const res = await fetch(API(`/students/search?q=${encodeURIComponent(query)}`)); setSearchResults(await res.json()) }
+    catch { setError('搜索失败') }
   }
 
   const handleExtract = async () => {
     if (!rawText.trim()) { setError('请输入学生信息'); return }
     setLoading(true); setError('')
-
     try {
       const res = await fetch(API('/extract'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: rawText, api_key: apiKey || undefined }),
       })
       if (!res.ok) throw new Error('提取失败')
@@ -81,159 +134,237 @@ function App() {
       setExtracted(data)
       if (data.students.length === 0) setError('未识别到学生信息')
       else setPage('preview')
-    } catch (e: any) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
+    } catch (e: any) { setError(e.message) }
+    finally { setLoading(false) }
   }
 
   const handleSave = async () => {
     if (!extracted) return
     setLoading(true); setError('')
-
     try {
       const res = await fetch(API('/save'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          grade: extracted.grade,
-          class_name: extracted.class,
-          students: extracted.students,
-          total_count: extracted.total_count,
+          grade: extracted.grade, class_name: extracted.class,
+          students: extracted.students, total_count: extracted.total_count,
           api_key: apiKey || undefined,
         }),
       })
       if (!res.ok) throw new Error('保存失败')
-      setExtracted(null)
-      setRawText('')
-      setPage('classes')
+      setExtracted(null); setRawText(''); setPage('classes')
       fetchClasses()
-    } catch (e: any) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
+    } catch (e: any) { setError(e.message) }
+    finally { setLoading(false) }
   }
 
-  const handleGenerate = async () => {
-    if (!selectedStudent) { setError('请先选择学生'); return }
+  const handleGenerate = async (studentId: number) => {
     if (!lessonContent.trim()) { setError('请输入课程内容'); return }
-    setLoading(true); setError(''); setEvaluations([]); setSelectedTemplate(null)
-
+    setLoading(true); setError(''); setEvaluations([])
+    const studentNote = studentNotes[studentId] || ''
     try {
       const res = await fetch(API('/generate'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          student_id: selectedStudent.id,
-          lesson_content: lessonContent,
-          lesson_notes: lessonNotes || undefined,
-          api_key: apiKey || undefined,
+          student_id: studentId, lesson_content: lessonContent,
+          lesson_notes: studentNote || undefined, api_key: apiKey || undefined,
         }),
       })
-      if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.detail || '生成失败')
-      }
+      if (!res.ok) { const err = await res.json(); throw new Error(err.detail || '生成失败') }
       const data = await res.json()
       setEvaluations(data)
-      setSelectedTemplate(data[0]?.template || null)
-    } catch (e: any) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
+    } catch (e: any) { setError(e.message) }
+    finally { setLoading(false) }
   }
 
-  const copyText = (text: string, idx: number) => {
-    navigator.clipboard.writeText(text)
-    setCopiedIdx(idx)
-    setTimeout(() => setCopiedIdx(null), 1500)
+  const handleBatchGenerate = async () => {
+    if (!lessonContent.trim()) { setError('请输入课程内容'); return }
+    setLoading(true); setError(''); setBatchResults([])
+    try {
+      const studentIds = selectedForBatch.size > 0 ? Array.from(selectedForBatch) : null
+      const res = await fetch(API('/batch-generate'), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          class_id: selectedClassId, student_ids: studentIds,
+          lesson_content: lessonContent, lesson_notes_global: lessonNotesGlobal || undefined,
+          student_notes: studentNotes, api_key: apiKey || undefined,
+        }),
+      })
+      if (!res.ok) { const err = await res.json(); throw new Error(err.detail || '批量生成失败') }
+      const data = await res.json()
+      setBatchResults(data.results)
+    } catch (e: any) { setError(e.message) }
+    finally { setLoading(false) }
   }
 
-  const templateColors: Record<string, string> = {
-    '80/20': 'border-[#7a9e8a] bg-[#f2f8f4]',
-    '65/35': 'border-[#4a6f8a] bg-[#f0f5f9]',
-    '90/10': 'border-[#c4613a] bg-[#fdf5f2]',
+  const handleAdopt = async (evalId: number) => {
+    try {
+      await fetch(API(`/evaluation/${evalId}/adopt`), { method: 'POST' })
+      setCopiedId(evalId)
+      setTimeout(() => setCopiedId(null), 2000)
+      // 刷新评价列表
+      if (selectedStudent) {
+        const res = await fetch(API(`/evaluations/${selectedStudent.id}`))
+        const data = await res.json()
+        // 更新当前显示的评价的采纳状态
+        setEvaluations(prev => prev.map(ev => {
+          const updated = data.find((d: any) => d.id === ev.id)
+          return updated ? { ...ev, is_adopted: updated.is_adopted } : ev
+        }))
+      }
+    } catch { setError('采纳失败') }
   }
 
-  const templateBadge: Record<string, string> = {
-    '80/20': 'bg-[#7a9e8a]',
-    '65/35': 'bg-[#4a6f8a]',
-    '90/10': 'bg-[#c4613a]',
+  const toggleSelectForBatch = (studentId: number) => {
+    const newSet = new Set(selectedForBatch)
+    if (newSet.has(studentId)) newSet.delete(studentId)
+    else newSet.add(studentId)
+    setSelectedForBatch(newSet)
+  }
+
+  const selectAllForBatch = () => {
+    if (selectedForBatch.size === classStudents.length) setSelectedForBatch(new Set())
+    else setSelectedForBatch(new Set(classStudents.map(s => s.id)))
+  }
+
+  const viewStudentDetail = (student: SavedStudent) => {
+    setSelectedStudent(student); setPage('student-detail')
+  }
+
+  const updateStudentNote = (studentId: number, note: string) => {
+    setStudentNotes(prev => ({ ...prev, [studentId]: note }))
+  }
+
+  // === CRUD handlers ===
+  const openCreateClass = () => { setEditingClass(null); setClassFormGrade(''); setClassFormName(''); setShowClassModal(true) }
+  const openEditClass = (c: { id: number; grade: string; name: string }) => { setEditingClass(c); setClassFormGrade(c.grade); setClassFormName(c.name); setShowClassModal(true) }
+  const handleSaveClass = async () => {
+    if (!classFormGrade || !classFormName) { setError('请填写完整'); return }
+    setLoading(true)
+    try {
+      if (editingClass) {
+        await fetch(API(`/class/${editingClass.id}`), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grade: classFormGrade, name: classFormName }) })
+      } else {
+        await fetch(API('/class'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grade: classFormGrade, name: classFormName }) })
+      }
+      setShowClassModal(false); fetchClasses()
+    } catch { setError('保存班级失败') }
+    finally { setLoading(false) }
+  }
+  const handleDeleteClass = async (classId: number) => {
+    if (!confirm('确定删除此班级吗？')) return
+    try { await fetch(API(`/class/${classId}`), { method: 'DELETE' }); fetchClasses() }
+    catch { setError('删除班级失败') }
+  }
+
+  const openCreateStudent = () => { setEditingStudent(null); setStudentFormName(''); setShowStudentModal(true) }
+  const openEditStudent = (s: { id: number; name: string }) => { setEditingStudent(s); setStudentFormName(s.name); setShowStudentModal(true) }
+  const handleSaveStudent = async () => {
+    if (!studentFormName) { setError('请填写姓名'); return }
+    setLoading(true)
+    try {
+      if (editingStudent) {
+        await fetch(API(`/student/${editingStudent.id}`), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ class_id: selectedClassId, name: studentFormName }) })
+      } else {
+        await fetch(API('/student'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ class_id: selectedClassId, name: studentFormName }) })
+      }
+      setShowStudentModal(false); fetchClassStudents(selectedClassId!)
+    } catch { setError('保存学生失败') }
+    finally { setLoading(false) }
+  }
+  const handleDeleteStudent = async (studentId: number) => {
+    if (!confirm('确定删除此学生吗？')) return
+    try { await fetch(API(`/student/${studentId}`), { method: 'DELETE' }); fetchClassStudents(selectedClassId!) }
+    catch { setError('删除学生失败') }
+  }
+
+  const openAddTrait = (studentId: number) => {
+    setTraitFormTrait(''); setTraitFormPct(''); setTraitFormOldName('')
+    setSelectedStudent(classStudents.find(s => s.id === studentId) || null)
+    setShowTraitModal(true)
+  }
+  const openEditTrait = (studentId: number, oldName: string, oldPct: number) => {
+    setTraitFormTrait(oldName); setTraitFormPct(String(oldPct)); setTraitFormOldName(oldName)
+    setSelectedStudent(classStudents.find(s => s.id === studentId) || null)
+    setShowTraitModal(true)
+  }
+  const handleSaveTrait = async () => {
+    if (!selectedStudent || !traitFormTrait || !traitFormPct) { setError('请填写完整'); return }
+    setLoading(true)
+    try {
+      const method = traitFormOldName ? 'PUT' : 'POST'
+      const url = traitFormOldName ? API(`/trait/${selectedStudent.id}/${encodeURIComponent(traitFormOldName)}`) : API(`/trait/${selectedStudent.id}`)
+      await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trait: traitFormTrait, percentage: parseInt(traitFormPct) }) })
+      setShowTraitModal(false); fetchClassStudents(selectedClassId!)
+    } catch { setError('保存特征失败') }
+    finally { setLoading(false) }
+  }
+  const handleDeleteTrait = async (studentId: number, traitName: string) => {
+    if (!confirm(`确定删除特征「${traitName}」吗？`)) return
+    try { await fetch(API(`/trait/${studentId}/${encodeURIComponent(traitName)}`), { method: 'DELETE' }); fetchClassStudents(selectedClassId!) }
+    catch { setError('删除特征失败') }
+  }
+
+  // Copy text to clipboard
+  const copyText = async (text: string, evalId: number) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      await handleAdopt(evalId)
+    } catch { setError('复制失败') }
   }
 
   return (
-    <div className="min-h-screen bg-[#faf8f5] pb-8">
-      {/* Header */}
-      <header className="bg-white/80 backdrop-blur-sm shadow-md border-b border-[#e8e2db] sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto px-4 py-3 flex justify-between items-center">
-          <h1 className="text-lg font-bold text-[#2d2a26]" style={{ fontFamily: "'Noto Serif SC', serif" }}>课后评价生成器</h1>
+    <div className="min-h-screen bg-gray-50 pb-8">
+      <header className="bg-white shadow-sm sticky top-0 z-10">
+        <div className="max-w-5xl mx-auto px-4 py-3 flex justify-between items-center">
+          <h1 className="text-lg font-bold text-gray-900">课后评价生成器</h1>
           <div className="flex gap-1 items-center">
-            <button onClick={() => setPage('input')} className={`text-sm px-3 py-1.5 rounded-full transition-all duration-200 ${page === 'input' ? 'bg-[#2d2a26] text-white' : 'text-[#6b6560] hover:bg-[#f5f2ee]'}`}>输入</button>
-            <button onClick={() => { setPage('classes'); setSelectedClassId(null); setClassStudents([]) }} className={`text-sm px-3 py-1.5 rounded-full transition-all duration-200 ${page === 'classes' ? 'bg-[#2d2a26] text-white' : 'text-[#6b6560] hover:bg-[#f5f2ee]'}`}>班级</button>
-            <button onClick={() => setShowSettings(!showSettings)} className="text-[#a89f96] ml-1 hover:bg-[#f5f2ee] rounded-full w-8 h-8 transition-colors flex items-center justify-center">⚙️</button>
+            <button onClick={() => setPage('input')} className={`text-sm px-3 py-1.5 rounded ${page === 'input' ? 'bg-blue-500 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>输入</button>
+            <button onClick={() => { setPage('classes'); setSelectedClassId(null); setClassStudents([]); setSelectedStudent(null) }} className={`text-sm px-3 py-1.5 rounded ${page === 'classes' ? 'bg-blue-500 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>班级</button>
+            <button onClick={() => setShowSettings(!showSettings)} className="text-gray-500 ml-1">⚙️</button>
           </div>
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-4 py-4 space-y-4">
-        {/* Settings */}
+      <main className="max-w-5xl mx-auto px-4 py-4 space-y-4">
         {showSettings && (
-          <div className="animate-fade-in-up bg-white rounded-xl p-4 shadow-md border border-[#e8e2db]">
-            <label className="block text-sm font-medium text-[#2d2a26] mb-1">千问 API Key</label>
-            <input type="password" value={apiKey} onChange={(e) => { setApiKey(e.target.value); localStorage.setItem('dashscope_api_key', e.target.value) }} placeholder="sk-..." className="w-full px-3 py-2 border border-[#e0dcd7] rounded-lg text-sm focus:ring-2 focus:ring-[#c4613a]/30 focus:border-[#c4613a] bg-[#faf8f5]" />
-            <p className="text-xs text-[#a89f96] mt-1">保存在浏览器本地</p>
+          <div className="bg-white rounded-xl p-4 shadow-sm">
+            <label className="block text-sm font-medium text-gray-700 mb-1">千问 API Key</label>
+            <input type="password" value={apiKey} onChange={(e) => { setApiKey(e.target.value); localStorage.setItem('dashscope_api_key', e.target.value) }} placeholder="sk-..." className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+            <p className="text-xs text-gray-400 mt-1">保存在浏览器本地</p>
           </div>
         )}
 
-        {/* Error */}
         {error && (
-          <div className="animate-fade-in-up bg-[#fdf5f2] border border-[#c4613a]/20 rounded-xl p-3">
-            <p className="text-[#c4613a] text-sm">{error}</p>
-            <button onClick={() => setError('')} className="text-[#c4613a]/60 text-xs mt-1 hover:text-[#c4613a] transition-colors">关闭</button>
+          <div className="bg-red-50 border border-red-200 rounded-xl p-3">
+            <p className="text-red-600 text-sm">{error}</p>
+            <button onClick={() => setError('')} className="text-red-400 text-xs mt-1">关闭</button>
           </div>
         )}
 
         {/* Page: Input */}
         {page === 'input' && (
-          <div className="animate-fade-in-up bg-white rounded-xl p-4 shadow-md border border-[#e8e2db]">
-            <h2 className="text-sm font-medium text-[#2d2a26] mb-2">输入学生信息</h2>
-            <div className="bg-[#f0f5f9] rounded-lg p-3 mb-3 border border-[#4a6f8a]/10">
-              <p className="text-xs text-[#4a6f8a] leading-relaxed">格式示例：<br />八年级 a 班 5 个学生<br />小明活泼好动喜欢上课跳舞，同时还是一个烦人精<br />小红比较安静但是做题很慢<br />小刚特别聪明就是有点懒</p>
-            </div>
-            <textarea value={rawText} onChange={(e) => setRawText(e.target.value)} placeholder={'例：\n八年级 a 班 5 个学生\n小明活泼好动喜欢上课跳舞，同时还是一个烦人精\n小红比较安静但是做题很慢\n小刚特别聪明就是有点懒'} rows={6} className="w-full px-3 py-2 border border-[#e0dcd7] rounded-lg text-sm focus:ring-2 focus:ring-[#c4613a]/30 focus:border-[#c4613a] resize-none bg-[#faf8f5] placeholder:text-[#a89f96]" />
-            <button onClick={handleExtract} disabled={loading} className="mt-3 w-full bg-[#2d2a26] text-white py-2.5 rounded-lg text-sm font-medium hover:bg-[#3d3a36] disabled:opacity-50 transition-all shadow-sm hover:shadow-md">
-              {loading ? (
-                <span className="flex items-center justify-center gap-2">
-                  <svg className="w-4 h-4 animate-spin-slow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <circle cx="12" cy="12" r="10" strokeOpacity="0.3" />
-                    <path d="M12 2a10 10 0 0 1 10 10" />
-                  </svg>
-                  AI 分析中...
-                </span>
-              ) : '识别学生信息'}
+          <div className="bg-white rounded-xl p-4 shadow-sm">
+            <h2 className="text-sm font-medium text-gray-700 mb-2">输入学生信息</h2>
+            <textarea value={rawText} onChange={(e) => setRawText(e.target.value)} placeholder={'例：\n八年级 a 班 5 个学生\n欧阳小明活泼好动喜欢上课跳舞\n张三丰比较安静但是做题很慢'} rows={6} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 resize-none" />
+            <button onClick={handleExtract} disabled={loading} className="mt-3 w-full bg-blue-500 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-600 disabled:opacity-50">
+              {loading ? 'AI 分析中...' : '识别学生信息'}
             </button>
           </div>
         )}
 
         {/* Page: Preview */}
         {page === 'preview' && extracted && (
-          <div className="animate-fade-in-up bg-white rounded-xl p-4 shadow-md border border-[#e8e2db]">
-            <h2 className="text-sm font-medium text-[#2d2a26] mb-3">{extracted.grade}{extracted.class} - {extracted.students.length} 名学生</h2>
+          <div className="bg-white rounded-xl p-4 shadow-sm">
+            <h2 className="text-sm font-medium text-gray-700 mb-3">{extracted.grade}{extracted.class} - {extracted.students.length} 名学生</h2>
             <div className="space-y-2 mb-4">
               {extracted.students.map((s, i) => (
-                <div key={i} className="p-3 bg-[#faf8f5] rounded-lg border border-[#e8e2db]/60">
-                  <div className="flex items-center gap-2">
-                    <div className="w-7 h-7 rounded-full bg-[#c4613a]/10 flex items-center justify-center text-[#c4613a] text-xs font-medium">{s.name.charAt(0)}</div>
-                    <span className="font-medium text-[#2d2a26]">{s.name}</span>
-                  </div>
-                  <div className="text-xs text-[#a89f96] mt-1">{s.traits_raw}</div>
+                <div key={i} className="p-3 bg-gray-50 rounded-lg">
+                  <div className="font-medium text-gray-900">{s.name}</div>
+                  <div className="text-xs text-gray-500 mt-1">{s.traits_raw}</div>
                   {s.traits_pct && Object.keys(s.traits_pct).length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mt-2">
-                      {Object.entries(s.traits_pct).map(([k, v], idx) => (
-                        <span key={k} className={`text-xs px-2 py-0.5 rounded-full ${['bg-[#c4613a]/10 text-[#c4613a]', 'bg-[#7a9e8a]/10 text-[#5d8a70]', 'bg-[#4a6f8a]/10 text-[#4a6f8a]', 'bg-[#b8860b]/10 text-[#b8860b]'][idx % 4]}`}>{k} {v}%</span>
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {Object.entries(s.traits_pct).map(([k, v]) => (
+                        <span key={k} className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{k} {v}%</span>
                       ))}
                     </div>
                   )}
@@ -241,168 +372,389 @@ function App() {
               ))}
             </div>
             <div className="flex gap-2">
-              <button onClick={() => setPage('input')} className="flex-1 bg-[#f5f2ee] text-[#6b6560] py-2.5 rounded-lg text-sm hover:bg-[#ebe6df] transition-colors">取消</button>
-              <button onClick={handleSave} disabled={loading} className="flex-1 bg-[#7a9e8a] text-white py-2.5 rounded-lg text-sm font-medium hover:bg-[#6a8e7a] disabled:opacity-50 transition-all shadow-sm">
-                {loading ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <svg className="w-4 h-4 animate-spin-slow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                      <circle cx="12" cy="12" r="10" strokeOpacity="0.3" />
-                      <path d="M12 2a10 10 0 0 1 10 10" />
-                    </svg>
-                    保存中...
-                  </span>
-                ) : '确认保存到数据库'}
+              <button onClick={() => setPage('input')} className="flex-1 bg-gray-200 text-gray-700 py-2.5 rounded-lg text-sm">取消</button>
+              <button onClick={handleSave} disabled={loading} className="flex-1 bg-green-500 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-green-600 disabled:opacity-50">
+                {loading ? '保存中...' : '确认保存到数据库'}
               </button>
             </div>
           </div>
         )}
 
         {/* Page: Classes */}
-        {page === 'classes' && (
+        {page === 'classes' && selectedStudent === null && (
           <div className="space-y-4">
+            {/* Search */}
+            <div className="bg-white rounded-xl p-4 shadow-sm">
+              <label className="block text-sm font-medium text-gray-700 mb-2">搜索学生</label>
+              <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="输入学生姓名..." className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+              {searchResults.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  {searchResults.map((s) => (
+                    <button key={s.id} onClick={() => { viewStudentDetail(s); setSearchQuery(''); setSearchResults([]); }} className="w-full flex justify-between items-center p-3 bg-gray-50 rounded-lg hover:bg-gray-100">
+                      <span className="font-medium text-gray-900">{s.name}</span>
+                      <span className="text-gray-400 text-sm">{s.class_name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {/* Class list */}
             {!selectedClassId && (
-              <div className="animate-fade-in-up bg-white rounded-xl p-4 shadow-md border border-[#e8e2db]">
-                <h2 className="text-sm font-medium text-[#2d2a26] mb-3">班级列表</h2>
+              <div className="bg-white rounded-xl p-4 shadow-sm">
+                <div className="flex justify-between items-center mb-3">
+                  <h2 className="text-sm font-medium text-gray-700">班级列表</h2>
+                  <button onClick={openCreateClass} className="text-xs bg-green-500 text-white px-3 py-1.5 rounded hover:bg-green-600">+ 新建班级</button>
+                </div>
                 {classes.length === 0 ? (
-                  <p className="text-[#a89f96] text-sm text-center py-4">暂无班级，请先输入学生信息</p>
+                  <p className="text-gray-400 text-sm text-center py-4">暂无班级</p>
                 ) : classes.map((c) => (
-                  <button key={c.id} onClick={() => fetchClassStudents(c.id)} className="w-full flex justify-between items-center p-3 bg-[#faf8f5] rounded-lg mb-2 hover:bg-[#f5f2ee] border border-[#e8e2db]/60 transition-all duration-200 group">
-                    <span className="font-medium text-[#2d2a26] group-hover:text-[#c4613a] transition-colors">{c.grade}{c.name}</span>
-                    <span className="text-[#a89f96] text-sm bg-white px-2.5 py-1 rounded-full border border-[#e8e2db]">{c.student_count} 人</span>
-                  </button>
+                  <div key={c.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg mb-2">
+                    <button onClick={() => fetchClassStudents(c.id)} className="flex-1 flex justify-between items-center">
+                      <span className="font-medium text-gray-900">{c.grade}{c.name}</span>
+                      <span className="text-gray-400 text-sm">{c.student_count} 人</span>
+                    </button>
+                    <div className="flex gap-1 ml-3">
+                      <button onClick={() => openEditClass(c)} className="text-xs text-blue-500 px-2 py-1 hover:bg-blue-50 rounded">编辑</button>
+                      <button onClick={() => handleDeleteClass(c.id)} className="text-xs text-red-500 px-2 py-1 hover:bg-red-50 rounded">删除</button>
+                    </div>
+                  </div>
                 ))}
               </div>
             )}
 
-            {/* Student list + generation */}
-            {selectedClassId && !selectedStudent && (
-              <div className="animate-fade-in-up bg-white rounded-xl p-4 shadow-md border border-[#e8e2db]">
-                <button onClick={() => { setSelectedClassId(null); setClassStudents([]) }} className="text-[#4a6f8a] text-sm mb-3 flex items-center gap-1 hover:underline transition-colors">← 返回班级列表</button>
-                <h2 className="text-sm font-medium text-[#2d2a26] mb-3">选择学生</h2>
-                <div className="space-y-2">
-                  {classStudents.map((s) => (
-                    <button key={s.id} onClick={() => { setSelectedStudent(s); setEvaluations([]); setSelectedTemplate(null) }} className="w-full text-left p-3 bg-[#faf8f5] rounded-lg hover:bg-[#f5f2ee] border border-[#e8e2db]/60 transition-all duration-200 group">
-                      <div className="flex justify-between items-center">
-                        <div className="flex items-center gap-2">
-                          <div className="w-7 h-7 rounded-full bg-[#4a6f8a]/10 flex items-center justify-center text-[#4a6f8a] text-xs font-medium">{s.name.charAt(0)}</div>
-                          <span className="font-medium text-[#2d2a26]">{s.name}</span>
-                        </div>
-                        <span className="text-xs text-[#a89f96] group-hover:text-[#c4613a] transition-colors">点击生成评价</span>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5 mt-1 ml-9">
-                        {s.traits.map((t, idx) => (
-                          <span key={t.trait} className={`text-xs px-2 py-0.5 rounded-full ${['bg-[#c4613a]/10 text-[#c4613a]', 'bg-[#7a9e8a]/10 text-[#5d8a70]', 'bg-[#4a6f8a]/10 text-[#4a6f8a]', 'bg-[#b8860b]/10 text-[#b8860b]'][idx % 4]}`}>{t.trait} {t.percentage}%</span>
+            {/* Student list */}
+            {selectedClassId && (
+              <div className="bg-white rounded-xl p-4 shadow-sm">
+                <button onClick={() => { setSelectedClassId(null); setClassStudents([]) }} className="text-blue-500 text-sm mb-3 block">← 返回班级列表</button>
+                <div className="flex justify-between items-center mb-3">
+                  <h2 className="text-sm font-medium text-gray-700">学生列表</h2>
+                  <div className="flex gap-2">
+                    <button onClick={openCreateStudent} className="text-xs bg-green-500 text-white px-3 py-1.5 rounded hover:bg-green-600">+ 添加学生</button>
+                    <button onClick={() => setShowBatchPanel(!showBatchPanel)} className="text-xs bg-blue-500 text-white px-3 py-1.5 rounded hover:bg-blue-600">
+                      {showBatchPanel ? '关闭批量' : '批量生成'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Course Content */}
+                <div className="mb-4 p-3 bg-amber-50 rounded-lg border border-amber-200">
+                  <label className="block text-xs font-medium text-amber-700 mb-1">本节课课程内容</label>
+                  <input type="text" value={lessonContent} onChange={(e) => setLessonContent(e.target.value)} placeholder="例：while 循环" className="w-full px-3 py-2 border border-gray-300 rounded text-sm" />
+                </div>
+
+                {/* Batch Panel */}
+                {showBatchPanel && (
+                  <div className="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-xs font-medium text-blue-700">已选 {selectedForBatch.size}/{classStudents.length}</span>
+                      <button onClick={selectAllForBatch} className="text-xs text-blue-600 hover:underline">
+                        {selectedForBatch.size === classStudents.length ? '全不选' : '全选'}
+                      </button>
+                    </div>
+                    <div className="mb-3">
+                      <label className="block text-xs font-medium text-blue-700 mb-1">全班整体表现（选填）</label>
+                      <input type="text" value={lessonNotesGlobal} onChange={(e) => setLessonNotesGlobal(e.target.value)} placeholder="例：今天大家都很开心" className="w-full px-3 py-2 border border-gray-300 rounded text-sm" />
+                    </div>
+                    <button onClick={handleBatchGenerate} disabled={loading || !lessonContent} className="w-full bg-blue-500 text-white py-2 rounded text-sm font-medium hover:bg-blue-600 disabled:opacity-50">
+                      {loading ? '生成中...' : `为 ${selectedForBatch.size > 0 ? selectedForBatch.size : classStudents.length} 名学生生成`}
+                    </button>
+                    {batchResults.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        {batchResults.map(r => (
+                          <div key={r.student_id} className={`text-xs p-2 rounded ${r.error ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}`}>
+                            {r.error ? `✗ ${r.student_name}: ${r.error}` : `✓ ${r.student_name} 已生成 ${r.evaluations?.length || 0} 份（见下方学生卡片）`}
+                          </div>
                         ))}
                       </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Generate panel */}
-            {selectedStudent && (
-              <div className="space-y-4">
-                <div className="bg-white rounded-xl p-4 shadow-md border border-[#e8e2db]">
-                  <div className="flex justify-between items-center mb-3">
-                    <button onClick={() => { setSelectedStudent(null); setEvaluations([]) }} className="text-[#4a6f8a] text-sm flex items-center gap-1 hover:underline transition-colors">← 返回列表</button>
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-full bg-[#c4613a]/10 flex items-center justify-center text-[#c4613a] text-xs font-medium">{selectedStudent.name.charAt(0)}</div>
-                      <span className="font-medium text-[#2d2a26]">{selectedStudent.name}</span>
-                    </div>
-                  </div>
-
-                  {/* Input row: 课程内容 + 课堂表现 */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-                    <div>
-                      <label className="block text-xs font-medium text-[#6b6560] mb-1">课程内容</label>
-                      <input type="text" value={lessonContent} onChange={(e) => setLessonContent(e.target.value)} placeholder="例：while 循环" className="w-full px-3 py-2 border border-[#e0dcd7] rounded-lg text-sm focus:ring-2 focus:ring-[#c4613a]/30 focus:border-[#c4613a] bg-[#faf8f5] placeholder:text-[#a89f96]" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-[#6b6560] mb-1">当堂表现（选填）</label>
-                      <input type="text" value={lessonNotes} onChange={(e) => setLessonNotes(e.target.value)} placeholder="例：今天上课积极但不愿写代码" className="w-full px-3 py-2 border border-[#e0dcd7] rounded-lg text-sm focus:ring-2 focus:ring-[#c4613a]/30 focus:border-[#c4613a] bg-[#faf8f5] placeholder:text-[#a89f96]" />
-                    </div>
-                  </div>
-
-                  <button onClick={handleGenerate} disabled={loading || !lessonContent} className="w-full bg-[#2d2a26] text-white py-2.5 rounded-lg text-sm font-medium hover:bg-[#3d3a36] disabled:opacity-50 transition-all shadow-sm hover:shadow-md">
-                    {loading ? (
-                      <span className="flex items-center justify-center gap-2">
-                        <svg className="w-4 h-4 animate-spin-slow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                          <circle cx="12" cy="12" r="10" strokeOpacity="0.3" />
-                          <path d="M12 2a10 10 0 0 1 10 10" />
-                        </svg>
-                        生成中...
-                      </span>
-                    ) : '生成 3 份评价'}
-                  </button>
-                </div>
-
-                {/* Template selector + evaluations */}
-                {evaluations.length > 0 && (
-                  <div className="space-y-3">
-                    {/* Template tabs */}
-                    <div className="flex gap-2">
-                      {evaluations.map((ev) => (
-                        <button
-                          key={ev.template}
-                          onClick={() => setSelectedTemplate(ev.template)}
-                          className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium border-2 transition-all ${
-                            selectedTemplate === ev.template
-                              ? `${templateBadge[ev.template]} text-white border-transparent shadow-sm`
-                              : 'bg-white text-[#6b6560] border-[#e8e2db] hover:border-[#d5d0c9]'
-                          }`}
-                        >
-                          {ev.template} {ev.label}
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* Selected evaluation */}
-                    {evaluations.map((ev, idx) => (
-                      selectedTemplate === ev.template && (
-                        <div key={idx} className={`rounded-xl p-4 border-2 ${templateColors[ev.template]}`}>
-                          <div className="flex justify-between items-center mb-3">
-                            <span className={`text-xs text-white px-2 py-1 rounded-full ${templateBadge[ev.template]}`}>
-                              {ev.template} · {ev.label}
-                            </span>
-                            <button
-                              onClick={() => copyText(ev.content, idx)}
-                              className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-all ${
-                                copiedIdx === idx
-                                  ? 'bg-[#7a9e8a] text-white'
-                                  : 'bg-white text-[#6b6560] border border-[#e8e2db] hover:bg-[#faf8f5]'
-                              }`}
-                            >
-                              {copiedIdx === idx ? '✓ 已复制' : '📋 复制'}
-                            </button>
-                          </div>
-                          <div className="text-sm text-[#2d2a26] whitespace-pre-wrap leading-relaxed bg-white rounded-lg p-3 border border-white/60">
-                            {ev.content}
-                          </div>
-                        </div>
-                      )
-                    ))}
+                    )}
                   </div>
                 )}
+
+                {/* Students */}
+                <div className="space-y-3">
+                  {classStudents.map((s) => {
+                    const hasEvals = evaluations.length > 0
+                    const studentBatch = batchResults.find(r => r.student_id === s.id)
+                    const showEvals = hasEvals || !!studentBatch
+                    const evals = hasEvals ? evaluations : (studentBatch?.evaluations || [])
+
+                    return (
+                      <div key={s.id} className="rounded-lg border border-gray-200 bg-white p-4">
+                        {/* Name + checkbox + CRUD */}
+                        <div className="flex items-start gap-2 mb-2">
+                          <input type="checkbox" checked={selectedForBatch.has(s.id)} onChange={() => toggleSelectForBatch(s.id)} className="mt-1 w-4 h-4 cursor-pointer" />
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-gray-900">{s.name}</span>
+                              <button onClick={() => viewStudentDetail(s)} className="text-xs text-blue-500 hover:underline">详情</button>
+                            </div>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {s.traits.map((t) => (
+                                <span key={t.trait} className="inline-flex items-center gap-0.5 text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
+                                  {t.trait} {t.percentage}%
+                                  <button onClick={() => openEditTrait(s.id, t.trait, t.percentage)} className="text-blue-500 hover:text-blue-700 ml-0.5">✎</button>
+                                  <button onClick={() => handleDeleteTrait(s.id, t.trait)} className="text-red-500 hover:text-red-700">×</button>
+                                </span>
+                              ))}
+                              <button onClick={() => openAddTrait(s.id)} className="text-xs text-green-600 hover:text-green-800">+ 特征</button>
+                            </div>
+                          </div>
+                          <div className="flex gap-1">
+                            <button onClick={() => openEditStudent({ id: s.id, name: s.name })} className="text-xs text-blue-500 px-2 py-1 rounded hover:bg-blue-50">编辑</button>
+                            <button onClick={() => handleDeleteStudent(s.id)} className="text-xs text-red-500 px-2 py-1 rounded hover:bg-red-50">删除</button>
+                            <button onClick={() => handleGenerate(s.id)} disabled={loading || !lessonContent} className="text-xs bg-blue-500 text-white px-3 py-1.5 rounded hover:bg-blue-600 disabled:opacity-50">生成</button>
+                          </div>
+                        </div>
+
+                        {/* 当堂表现 - inline text input, separate line */}
+                        <div className="mt-2 pl-6">
+                          <label className="block text-xs font-medium text-gray-500 mb-1">当堂表现</label>
+                          <input
+                            type="text"
+                            value={studentNotes[s.id] || ''}
+                            onChange={(e) => updateStudentNote(s.id, e.target.value)}
+                            placeholder="例：今天上课积极，但不太愿意写代码"
+                            className="w-full px-3 py-1.5 border border-gray-200 rounded text-sm bg-gray-50 focus:bg-white focus:ring-1 focus:ring-blue-300"
+                          />
+                        </div>
+
+                        {/* Evaluations - all 3 shown at once */}
+                        {showEvals && evals.length > 0 && (
+                          <div className="mt-3 space-y-3 pl-6">
+                            <div className="text-xs font-medium text-gray-600">生成的评价（点击「复制并采纳」即可使用）</div>
+                            {evals.map((ev, idx) => (
+                              <div key={ev.id || idx} className={`rounded-lg border-2 p-3 ${templateColors[ev.template] || 'border-gray-200'}`}>
+                                <div className="flex justify-between items-center mb-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${templateBadge[ev.template]} text-white`}>
+                                      {ev.template} · {ev.label}
+                                    </span>
+                                    {ev.is_adopted && (
+                                      <span className="text-xs bg-green-600 text-white px-2 py-0.5 rounded-full">已采纳</span>
+                                    )}
+                                  </div>
+                                  <button
+                                    onClick={() => copyText(ev.content, ev.id || idx)}
+                                    className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-all ${
+                                      copiedId === ev.id
+                                        ? 'bg-green-500 text-white'
+                                        : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+                                    }`}
+                                  >
+                                    {copiedId === ev.id ? '✓ 已复制并采纳' : '📋 复制并采纳'}
+                                  </button>
+                                </div>
+                                <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed bg-white/70 rounded-lg p-3">
+                                  {ev.content}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
             )}
           </div>
         )}
 
-        {/* Loading overlay */}
+        {/* Student Detail Page */}
+        {page === 'student-detail' && selectedStudent && (
+          <StudentDetailPage
+            student={selectedStudent}
+            onBack={() => { setPage('classes'); setSelectedStudent(null) }}
+          />
+        )}
+
+        {/* Modals */}
+        {showClassModal && (
+          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl p-6 shadow-lg w-full max-w-sm">
+              <h3 className="text-sm font-medium text-gray-700 mb-4">{editingClass ? '编辑班级' : '新建班级'}</h3>
+              <div className="space-y-3">
+                <div><label className="block text-xs font-medium text-gray-600 mb-1">年级</label><input type="text" value={classFormGrade} onChange={(e) => setClassFormGrade(e.target.value)} placeholder="例：八年级" className="w-full px-3 py-2 border border-gray-300 rounded text-sm" /></div>
+                <div><label className="block text-xs font-medium text-gray-600 mb-1">班级名</label><input type="text" value={classFormName} onChange={(e) => setClassFormName(e.target.value)} placeholder="例：a 班" className="w-full px-3 py-2 border border-gray-300 rounded text-sm" /></div>
+              </div>
+              <div className="flex gap-2 mt-4">
+                <button onClick={() => setShowClassModal(false)} className="flex-1 bg-gray-200 text-gray-700 py-2 rounded text-sm">取消</button>
+                <button onClick={handleSaveClass} className="flex-1 bg-blue-500 text-white py-2 rounded text-sm hover:bg-blue-600">保存</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showStudentModal && (
+          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl p-6 shadow-lg w-full max-w-sm">
+              <h3 className="text-sm font-medium text-gray-700 mb-4">{editingStudent ? '编辑学生' : '添加学生'}</h3>
+              <div><label className="block text-xs font-medium text-gray-600 mb-1">姓名</label><input type="text" value={studentFormName} onChange={(e) => setStudentFormName(e.target.value)} placeholder="学生姓名" className="w-full px-3 py-2 border border-gray-300 rounded text-sm" /></div>
+              <div className="flex gap-2 mt-4">
+                <button onClick={() => setShowStudentModal(false)} className="flex-1 bg-gray-200 text-gray-700 py-2 rounded text-sm">取消</button>
+                <button onClick={handleSaveStudent} className="flex-1 bg-blue-500 text-white py-2 rounded text-sm hover:bg-blue-600">保存</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showTraitModal && selectedStudent && (
+          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl p-6 shadow-lg w-full max-w-sm">
+              <h3 className="text-sm font-medium text-gray-700 mb-4">{traitFormOldName ? '编辑特征' : '添加特征'} - {selectedStudent.name}</h3>
+              <div className="space-y-3">
+                <div><label className="block text-xs font-medium text-gray-600 mb-1">特征名称</label><input type="text" value={traitFormTrait} onChange={(e) => setTraitFormTrait(e.target.value)} placeholder="例：活泼好动" className="w-full px-3 py-2 border border-gray-300 rounded text-sm" /></div>
+                <div><label className="block text-xs font-medium text-gray-600 mb-1">占比 (%)</label><input type="number" value={traitFormPct} onChange={(e) => setTraitFormPct(e.target.value)} placeholder="30" min="0" max="100" className="w-full px-3 py-2 border border-gray-300 rounded text-sm" /></div>
+              </div>
+              <div className="flex gap-2 mt-4">
+                <button onClick={() => setShowTraitModal(false)} className="flex-1 bg-gray-200 text-gray-700 py-2 rounded text-sm">取消</button>
+                <button onClick={handleSaveTrait} className="flex-1 bg-blue-500 text-white py-2 rounded text-sm hover:bg-blue-600">保存</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {loading && (
-          <div className="fixed inset-0 bg-[#2d2a26]/20 backdrop-blur-sm flex items-center justify-center z-50">
-            <div className="bg-white rounded-xl p-6 shadow-lg border border-[#e8e2db]">
-              <svg className="w-6 h-6 text-[#c4613a] mx-auto mb-2 animate-spin-slow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10" strokeOpacity="0.2" />
-                <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
-              </svg>
-              <p className="text-sm text-[#6b6560]">处理中...</p>
+          <div className="fixed inset-0 bg-black/20 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl p-6 shadow-lg">
+              <div className="animate-spin text-2xl mb-2">⏳</div>
+              <p className="text-sm text-gray-600">处理中...</p>
             </div>
           </div>
         )}
       </main>
+    </div>
+  )
+}
+
+// Student Detail Component
+function StudentDetailPage({
+  student,
+  onBack,
+}: {
+  student: SavedStudent
+  onBack: () => void
+}) {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [studentDetail, setStudentDetail] = useState<any>(null)
+  const [copiedId, setCopiedId] = useState<number | null>(null)
+
+  useEffect(() => { fetchStudentDetail() }, [student.id])
+
+  const fetchStudentDetail = async () => {
+    setLoading(true)
+    try {
+      const [traitsRes, tempTraitsRes, evalsRes] = await Promise.all([
+        fetch(`/api/student/${student.id}/traits`),
+        fetch(`/api/student/${student.id}/temp-traits`),
+        fetch(`/api/evaluations/${student.id}`),
+      ])
+      setStudentDetail({
+        traits: await traitsRes.json(),
+        temp_traits: await tempTraitsRes.json(),
+        evaluations: await evalsRes.json(),
+      })
+    } catch { setError('获取学生详情失败') }
+    finally { setLoading(false) }
+  }
+
+  const handleAdoptAndCopy = async (evalId: number, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      await fetch(`/api/evaluation/${evalId}/adopt`, { method: 'POST' })
+      setCopiedId(evalId)
+      setTimeout(() => setCopiedId(null), 2000)
+      // Refresh
+      const res = await fetch(`/api/evaluations/${student.id}`)
+      const evals = await res.json()
+      setStudentDetail((prev: any) => prev ? { ...prev, evaluations: evals } : prev)
+    } catch { setError('复制失败') }
+  }
+
+  const badgeColors: Record<string, string> = {
+    '80/20': 'bg-green-500', '65/35': 'bg-blue-500', '90/10': 'bg-yellow-500',
+  }
+  const borderColors: Record<string, string> = {
+    '80/20': 'border-green-300 bg-green-50/30',
+    '65/35': 'border-blue-300 bg-blue-50/30',
+    '90/10': 'border-yellow-300 bg-yellow-50/30',
+  }
+
+  if (loading) return (
+    <div className="bg-white rounded-xl p-4 shadow-sm text-center">
+      <div className="animate-spin text-2xl mb-2">⏳</div>
+      <p className="text-sm text-gray-600">加载中...</p>
+    </div>
+  )
+
+  return (
+    <div className="space-y-4">
+      <button onClick={onBack} className="text-blue-500 text-sm">← 返回列表</button>
+
+      {/* Basic Info */}
+      <div className="bg-white rounded-xl p-4 shadow-sm">
+        <h2 className="text-sm font-medium text-gray-700 mb-3">{student.name} - 个人信息</h2>
+        <div className="space-y-2">
+          {student.class_name && (
+            <div className="text-sm text-gray-600">班级：{student.class_name}</div>
+          )}
+          <div className="text-sm text-gray-600">原始特点：{student.traits_raw || '无'}</div>
+          {studentDetail?.traits && studentDetail.traits.length > 0 && (
+            <div>
+              <div className="text-xs font-medium text-gray-500 mb-1">长期性格画像：</div>
+              <div className="flex flex-wrap gap-1">
+                {studentDetail.traits.map((t: any) => (
+                  <span key={t.trait} className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{t.trait} {t.percentage}%</span>
+                ))}
+              </div>
+            </div>
+          )}
+          {studentDetail?.temp_traits && studentDetail.temp_traits.length > 0 && (
+            <div>
+              <div className="text-xs font-medium text-gray-500 mb-1">当堂表现：</div>
+              <div className="flex flex-wrap gap-1">
+                {studentDetail.temp_traits.map((t: any) => (
+                  <span key={t.trait} className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">{t.trait} {t.percentage}%</span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* History Evaluations - all shown, with adopted status */}
+      {studentDetail?.evaluations && studentDetail.evaluations.length > 0 && (
+        <div className="bg-white rounded-xl p-4 shadow-sm">
+          <h2 className="text-sm font-medium text-gray-700 mb-3">历史评价 ({studentDetail.evaluations.length})</h2>
+          <div className="space-y-3">
+            {studentDetail.evaluations.map((ev: any) => (
+              <div key={ev.id} className={`rounded-xl p-4 border-2 ${borderColors[ev.template] || 'border-gray-200'}`}>
+                <div className="flex justify-between items-center mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs text-white px-2 py-1 rounded-full ${badgeColors[ev.template] || 'bg-gray-500'}`}>{ev.template}</span>
+                    <span className="text-xs text-gray-500">{ev.lesson_date}</span>
+                    {ev.is_adopted && (
+                      <span className="text-xs bg-green-600 text-white px-2 py-0.5 rounded-full">已采纳</span>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => handleAdoptAndCopy(ev.id, ev.content)}
+                    className={`text-xs px-3 py-1.5 rounded-lg font-medium ${
+                      copiedId === ev.id ? 'bg-green-500 text-white' : 'bg-white border border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    {copiedId === ev.id ? '✓ 已复制并采纳' : '📋 复制并采纳'}
+                  </button>
+                </div>
+                <div className="text-sm text-gray-700 whitespace-pre-wrap bg-white/70 rounded-lg p-3">{ev.content}</div>
+                {ev.lesson_content && <div className="text-xs text-gray-500 mt-2">课程内容：{ev.lesson_content}</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

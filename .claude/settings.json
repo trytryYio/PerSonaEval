@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(taskkill /PID 24896 /F)",
+      "Bash(powershell -Command \"Stop-Process -Id 24896 -Force\")",
+      "Bash(taskkill //PID 25428 //F)",
+      "Bash(powershell -Command \"Stop-Process -Id 25428 -Force\")",
+      "Bash(taskkill //F //IM python.exe)",
+      "Bash(taskkill //PID 6452 //F)",
+      "Bash(curl -s http://localhost:8001/health)",
+      "Bash(curl -s http://localhost:8001/api/classes)",
+      "Bash(curl -s -X POST http://localhost:8001/api/class -H \"Content-Type: application/json\" -d '{\"grade\":\"七年级\",\"name\":\"b班\"}')",
+      "Bash(curl -sv -X POST http://localhost:8001/api/class -H \"Content-Type: application/json\" -d '{\"grade\":\"七年级\",\"name\":\"b班\",\"student_count\":0}')",
+      "Bash(curl -s -X POST http://localhost:8001/api/class -H \"Content-Type: application/json\" -d '{\"grade\":\"五年级\",\"name\":\"c班\",\"student_count\":0}')",
+      "Bash(curl -s -X POST http://localhost:8001/api/class -H \"Content-Type: application/json\" -d @-)",
+      "Bash(curl -s -X POST http://localhost:8001/api/student -H \"Content-Type: application/json\" -d @-)"
+    ]
+  },
+  "enabledPlugins": {
+    "andrej-karpathy-skills@karpathy-skills": true
+  }
+}

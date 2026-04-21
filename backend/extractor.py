@@ -28,11 +28,11 @@ DASHSCOPE_API_KEY = "sk-43434062596d44979a152c8e763d6e20"
 
 def extract_grade_and_class(text: str) -> tuple[str, str]:
     """提取年级和班级"""
-    m = re.search(r"([一二三四五六七八九十\d]+)年级\s*([a-zA-Z\d一二三四五六七八九十]+)班", text)
+    m = re.search(r"([一二三四五六七八九十\d]+) 年级\s*([a-zA-Z\d 一二三四五六七八九十]+) 班", text)
     if m:
         return m.group(1) + "年级", m.group(2) + "班"
 
-    m = re.search(r"([一二三四五六七八九十\d]+)年\s*([a-zA-Z\d一二三四五六七八九十]+)班", text)
+    m = re.search(r"([一二三四五六七八九十\d]+) 年\s*([a-zA-Z\d一二三四五六七八九十]+) 班", text)
     if m:
         return m.group(1) + "年级", m.group(2) + "班"
 
@@ -40,7 +40,7 @@ def extract_grade_and_class(text: str) -> tuple[str, str]:
     if m:
         return m.group(1), m.group(2) + "班"
 
-    m = re.search(r"([一二三四五六七八九十\d]+)\s*(?:年级|年)\s*([a-zA-Z\d一二三四五六七八九十]+)\s*班", text)
+    m = re.search(r"([一二三四五六七八九十\d]+)\s*(?:年级 | 年)\s*([a-zA-Z\d一二三四五六七八九十]+)\s*班", text)
     if m:
         return m.group(1) + "年级", m.group(2) + "班"
 
@@ -60,12 +60,13 @@ def parse_students_from_text(text: str) -> List[Dict[str, str]]:
     """
     从文本中分割出每个学生描述
     按换行分割，识别句首名字（排除年级/班级行）
+    支持 2-4 字姓名
     """
     students = []
     lines = re.split(r"\n+", text.strip())
 
-    # 常见中文姓氏
-    SURNAMES = set("王李张刘陈杨赵黄周吴徐孙胡朱高林何郭马罗梁宋郑谢韩唐冯于董萧程曹袁邓许傅沈曾彭吕苏卢蒋蔡贾丁魏薛叶阎余潘杜戴夏钟汪田任姜范方石姚谭廖邹熊金陆郝孔白崔康毛邱秦江史顾侯邵孟龙万段雷钱汤尹黎易常武乔贺赖龚文庞樊兰殷施陶翟安颜倪严牛温芦季俞章鲁葛伍韦申尤毕聂丛焦向柳邢路岳齐沿梅莫庄辛管祝左涂谷祁时舒耿牟卜肖詹关苗凌费纪靳盛童欧甄项曲成游阳裴席卫查屈鲍位覃霍翁隋植甘景薄单包司柏宁柯阮桂闵欧阳解强柴华车冉房边")
+    # 描述性词汇开头（用于识别名字结束位置）
+    DESC_STARTERS = "性很非特比喜活开内文沉稳细粗认积聪懒安敏勇强静杰芳磊洋艳军霞平刚调皮好爱喜厌讨怕愿想会能可足欠多少太最较为更越渐愈愈越加尤其特别相当十分非常挺怪挺较蛮颇甚是确当真确实实在果真正真果然居然竟然忽然突然渐渐慢慢缓缓逐渐时时常常往往每每频频屡屡接连连连忽地猛地骤然陡然霍然顿时光溜溜圆滚滚胖乎乎瘦巴巴瘦伶仃胖墩墩圆咕隆咚黑黝黝白净净红扑扑光灿灿亮堂堂明晃晃雾蒙蒙灰扑扑尘漫漫水灵灵干巴巴湿漉漉潮乎乎汗津津油腻腻脏兮兮乱糟糟嘈杂杂闹哄哄静悄悄寂静静幽幽空荡荡空旷旷宽绰绰紧巴巴松垮垮软绵绵硬邦邦沉甸甸轻飘飘飘悠悠慢腾腾急匆匆急忙忙慌慌张张忐忐忑忑兴冲冲怒冲冲气呼呼乐呵呵笑眯眯笑嘻嘻笑哈哈哭啼啼愁眉苦苦大仇深欢欢喜喜悲悲切切高高兴兴快快乐乐开开心心愉愉快快安安静静吵吵闹闹打打闹闹蹦蹦跳跳跑跑走走停停说说笑笑唱唱跳跳写写画画读读写写背背诵诵练练习习考考试试试测验验做做玩玩吃吃喝喝睡睡觉觉起起床床穿穿衣衣脱脱鞋鞋洗洗澡澡刷刷牙牙梳梳头头洗洗脸脸擦擦手手揉揉眼眼捏捏鼻鼻掏掏耳耳剪剪指指甲甲理理发发刮刮胡胡修修面面整整容容健健身身锻锻炼炼运运动动游游泳泳跑跑步步跳跳绳绳踢踢球球打打球球拍拍球球骑骑车车滑滑冰冰滑滑板板登登山山爬爬山山走走步步散散步步遛遛狗狗溜溜弯弯转转逛逛看看望望想想念念记记挂挂担担心心心心疼疼忧忧虑虑焦焦急急烦烦恼恼生生气气恨怨恨怨悔悔恨憾惋惋惜惜遗遗憾憾可可悯怜悯同情情同同理理心心心相相印印心心心相相息息心心心心心相相印印心心心相相惜惜"
 
     for line in lines:
         line = line.strip()
@@ -73,29 +74,46 @@ def parse_students_from_text(text: str) -> List[Dict[str, str]]:
             continue
 
         # 跳过年级/班级行
-        if re.match(r"^[一二三四五六七八九十\d]+年级", line) or re.match(r"^[高初][一二三]", line):
+        if re.match(r"^[一二三四五六七八九十\d]+年级", line) or re.match(r"^[高初][一二三\d]", line):
             continue
-        if re.search(r"\d+\s*个", line) and not re.match(r"^[\u4e00-\u9fa5]{2,3}", line):
+        if re.search(r"\d+\s*个", line) and not re.match(r"^[\u4e00-\u9fa5]{2,}", line):
             continue
 
-        # 尝试匹配常见姓氏
-        name = ""
-        if len(line) >= 2 and line[0] in SURNAMES:
-            # 2字名：姓+名
-            if len(line) >= 3 and line[1] in SURNAMES or True:  # 第二个字也可是名
-                name = line[:2]
-                desc = line[2:].strip()
-                if desc:
-                    students.append({"name": name, "traits_raw": desc})
-                    continue
+        # 跳过纯数字或符号行
+        if re.match(r"^[\d\s\.,;:!?,.。，；：！、]+$", line):
+            continue
 
-        # 通用匹配：句首 2 个中文字作为名字（假设名字后紧跟描述性文字）
-        m = re.match(r"^([\u4e00-\u9fa5]{2})(?:性|很|非|特|比|喜|活|开|内|文|沉|细|粗|认|积|聪|懒|安|敏|勇|强|静|杰|芳|磊|洋|艳|军|霞|平|刚|调|皮|好)", line)
+        # 尝试匹配 4 字姓名
+        if len(line) >= 5:
+            potential_name_4 = line[:4]
+            rest_4 = line[4:]
+            if rest_4 and any(c in DESC_STARTERS for c in rest_4[:3] if c):
+                students.append({"name": potential_name_4, "traits_raw": rest_4.strip()})
+                continue
+
+        # 尝试匹配 3 字姓名
+        if len(line) >= 4:
+            potential_name_3 = line[:3]
+            rest_3 = line[3:]
+            if rest_3 and any(c in DESC_STARTERS for c in rest_3[:2] if c):
+                students.append({"name": potential_name_3, "traits_raw": rest_3.strip()})
+                continue
+
+        # 尝试匹配 2 字姓名
+        if len(line) >= 3:
+            potential_name_2 = line[:2]
+            rest_2 = line[2:]
+            if rest_2 and any(c in DESC_STARTERS for c in rest_2[:2] if c):
+                students.append({"name": potential_name_2, "traits_raw": rest_2.strip()})
+                continue
+
+        # 通用匹配：句首 2-4 个中文字作为名字
+        m = re.match(r"^([\u4e00-\u9fa5]{2,4})", line)
         if m:
-            name = m.group(1)
-            desc = line[len(name):].strip()
-            if desc:
-                students.append({"name": name, "traits_raw": desc})
+            candidate = m.group(1)
+            rest = line[len(candidate):].strip()
+            if rest and len(rest) >= 2:
+                students.append({"name": candidate, "traits_raw": rest})
 
     return students
 
@@ -129,7 +147,7 @@ def analyze_traits_with_ai(students: List[Dict], api_key: str = DASHSCOPE_API_KE
    - "做题慢" → "需要更多练习"
 4. 输出纯 JSON，格式如下：
 {{
-  "学生名字": {{"标签1": 占比1, "标签2": 占比2, ...}},
+  "学生名字": {{"标签 1": 占比 1, "标签 2": 占比 2, ...}},
   ...
 }}
 
